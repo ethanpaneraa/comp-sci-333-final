@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html>
+<style>
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            margin: 0; 
+            background-color: #f3f3f3;
+        }
+        .header {
+            text-align: center;
+            font-size: 50px;
+            padding: 10px;
+            background-color: #f3f3f3;
+            font-weight: bold;
+        }
+
+
+        .filters {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            background-color: #f3f3f3;
+            align-items: center;
+            flex-direction: column;
+            text-align: center;
+        }
+
+        .slider-container {
+            margin: auto;
+            width: 20%;
+            background-color: #f3f3f3;
+        }
+
+        .content {
+            display: flex;
+            width: 100%;
+            background-color: #f3f3f3;
+        }
+        .map-section {
+            padding: 10px;
+            background-color: #f3f3f3;
+        }
+        .graphs-section {
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-around;
+            background-color: #f3f3f3;
+        }
+        .graph-container {
+            margin-bottom: 40px;
+            background-color: #f3f3f3;
+        }
+</style>
+<head>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <link rel="stylesheet" href="https://code.jquery.com/mobile/1.4.5/jquery.mobile-1.4.5.min.css"/> 
+    <script src="https://code.jquery.com/jquery-1.11.1.min.js"></script> 
+    <script src="https://code.jquery.com/mobile/1.4.5/jquery.mobile-1.4.5.min.js"></script> 
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="utf-8">
+</head>
+<body>
+    <div class="header">
+        Chicago Crime Interactive Visualization
+    </div>
+    <div style="text-align: center; padding: 10px; background-color: #f3f3f3;">
+        <p>Welcome to the Chicago Crime Interactive Visualization. Use the filters below to select crime types and year range. Click on the wards in the map to see detailed crime statistics </p>
+
+    </div>
+    <div class="filters">
+        <label for="crime-type-dropdown">Select Crime Types</label>
+        <select id="crime-type-dropdown" multiple size="5" data-role="none"></select>
+        <div class="slider-container">
+            <label>Select Year Range</label>
+            <div data-role="rangeslider" id="gfg"> 
+                <input
+                    id="range-slider-1" 
+                    name="range-slider-1" 
+                    min="2012" 
+                    max="2016" 
+                    value="2012" 
+                    type="range"> 
+                <input 
+                    id="range-slider-2"
+                    name="range-slider-2" 
+                    min="2012" 
+                    max="2016" 
+                    value="2016" 
+                    type="range">  
+            </div>
+        </div>
+    </div>
+    <div class="content">
+        <div class="map-section">
+            <svg id="map" width="600" height="600"></svg>
+        </div>
+        <div class="graphs-section"">
+            <div class="graph-container">
+                <div id="barChart"></div>
+            </div>
+            <div class="graph-container">
+                <div id="descriptionChart"></div>
+            </div>
+            <div class="graph-container">
+                <div id="locationDescriptionChart"></div>
+            </div>
+            <div class="graph-container">
+                <div id="arrestChart"></div>
+            </div>
+        </div>
+    </div>
+    <div id="tooltip" class="tooltip" style="position: absolute; opacity: 0; pointer-events: none; background-color: white; border: solid 1px; padding: 10px; border-radius: 5px;"></div>
+    <div id="barChartTooltip" style="position: absolute; opacity: 0; pointer-events: none; background-color: white; border: solid 1px; padding: 10px; border-radius: 5px;""></div>
+    <div id="locationDescriptionChartTooltip" class="tooltip" style="position: absolute; opacity: 0; pointer-events: none; background-color: white; border: solid 1px; padding: 10px; border-radius: 5px;"></div>
+    <div id="arrestChartTooltip" class="tooltip" style="position: absolute; opacity: 0; pointer-events: none; background-color: white; border: solid 1px; padding: 10px; border-radius: 5px;"></div>
+    <div id="descriptionChartTooltip" class="tooltip" style="position: absolute; opacity: 0; pointer-events: none; background-color: white; border: solid 1px; padding: 10px; border-radius: 5px;"></div>
+    <script> 
+
+    var originalData = []; 
+    var geojsonDataGlobal; 
+    var selectedWards = new Set(); 
+    var colorScale = d3.scaleSequential(d3.interpolateBlues)
+    var wardColorScale = d3.scaleOrdinal()
+        .domain(selectedWards)
+        .range(d3.schemeCategory10);
+    function getSliderValues() {
+        var slider1 = document.getElementById("range-slider-1")
+        var slider2 = document.getElementById("range-slider-2")
+        var output1 = parseInt(slider1.value, 10);
+        var output2 = parseInt(slider2.value, 10);
+        // console.log(output1);
+        // console.log(output2);
+        return [output1, output2];
+    };
+
+    function filterDataByYearRange(data, yearStart, yearEnd) {
+        console.log("Types - Start:", typeof yearStart, "End:", typeof yearEnd); // Check types
+        if (yearStart === yearEnd) {
+            console.log("Same year selected:", yearStart);
+            return data.filter(function(d) {
+                return parseInt(d.Year, 10) === yearStart;
+            });
+        } else {
+            return data.filter(function(d) {
+                return parseInt(d.Year, 10) >= yearStart && parseInt(d.Year, 10) <= yearEnd;
+            });
+        }; 
+    };
+    
+    $(document).ready(function() { 
+        $("#gfg").rangeslider("option", "theme", "b"); 
+        $(document).on('slidestop', '#range-slider-1, #range-slider-2', function() {
+        var [yearStart, yearEnd] = getSliderValues();
+        console.log(yearStart, yearEnd)
+        updateData(yearStart, yearEnd); 
+        });
+    }); 
+    
+    
+    let mouseOver = function(event, d) {
+    
+    d3.select(this)
+        .transition()
+        .duration(80)
+        .style("stroke", "black")
+        .style("stroke-width", 2.5)
+        .style("opacity", 1); 
+
+        getAldermanInfo(String(d.properties.ward)).then(function(aldermanInfo) {
+        var tooltip = d3.select("#tooltip");
+        var tooltipHtml = `
+            <div style="font-size: 14px; margin-bottom: 10px;">
+                <strong>Ward:</strong> ${d.properties.ward}<br/>
+                <strong>Alderman:</strong> ${aldermanInfo ? aldermanInfo.ALDERMAN : "Not available"}<br/>
+                <strong>Crime Percentage:</strong> ${parseFloat(d.properties.crimePercentage).toFixed(2)}%<br/>
+                <strong>Zip Code:</strong> ${aldermanInfo ? aldermanInfo.ZIPCODE : "Not available"}
+            </div>
+            ${aldermanInfo && aldermanInfo.PHOTO ? `<img src="${aldermanInfo.PHOTO}" alt="Alderman Photo" style="width: 100px; height: 100px; display: block; margin: auto;">` : ''}
+        `;
+
+        tooltip.style("opacity", 0.9)
+            .html(tooltipHtml)
+            .style("left", (event.pageX + 10) + "px")
+            .style("top", (event.pageY - 28) + "px");
+    });
+};
+
+    let mouseLeave = function(event, d) {
+        d3.selectAll(".ward")
+            .transition()
+            .duration(100)
+            .style("stroke-width", function(d) {
+                return selectedWards.has(String(d.properties.ward)) ? 2.5 : 1;
+            })
+            .style("stroke", function(d) {
+                return selectedWards.has(String(d.properties.ward)) ? "red" : "#000";
+            }) 
+            .style("opacity", 1);
+
+        var tooltip = d3.select("#tooltip");
+        tooltip.style("opacity", 0);
+
+    };
+
+    var crimeDataGlobal;
+
+    var svg = d3.select("svg"),
+    width = +svg.attr("width"),
+    height = +svg.attr("height");
+
+    var projection = d3.geoMercator()
+        .scale(1) 
+        .translate([0, 0]);
+
+    var path = d3.geoPath()
+    .projection(projection);
+
+    function updateDropdown(crimeTypes) {
+        let dropdown = d3.select("#crime-type-dropdown");
+
+        dropdown.selectAll("option").remove(); 
+
+        dropdown.append("option")
+            .attr("value", "All")
+            .text("All")
+
+        crimeTypes.forEach(function(crimeType) {
+            if (crimeType !== "All") {
+                dropdown.append("option")
+                .text(crimeType)
+                .attr("value", crimeType);
+            }; 
+        });
+
+        dropdown.property("value", "All");
+    };
+
+document.addEventListener('DOMContentLoaded', function() {
+    var crimeTypeDropdown = document.getElementById("crime-type-dropdown");
+
+    crimeTypeDropdown.addEventListener('change', function() {
+        var selectedOptions = crimeTypeDropdown.selectedOptions;
+        var selectedCrimes = Array.from(selectedOptions).map(function(option) {
+            return option.value;
+        });
+        console.log(selectedCrimes);
+        var [yearStart, yearEnd] = getSliderValues();
+        updateData(yearStart, yearEnd); 
+        return selectedCrimes;
+    });
+})
+
+function filterDataByCrimeType(data, crimeTypes) {
+    if (crimeTypes.includes("All")) {
+        return data; 
+    };
+    return data.filter(function(d) {
+        return crimeTypes.includes(d["Primary Type"]);
+    }); 
+};
+
+function updateMap(crimePercentagesByWard) {
+    geojsonDataGlobal.features.forEach(function(d) {
+        let ward = d.properties.ward; 
+        d.properties.crimePercentage = crimePercentagesByWard[ward] || 0; 
+    });
+
+    svg.selectAll(".ward")
+        .data(geojsonDataGlobal.features, function(d) { return d.properties.ward; })
+        .transition()
+        .duration(200)
+        .style("fill", function(d) {
+            return colorScale(d.properties.crimePercentage || 0);
+        }); 
+};
+
+function updateData(yearStart, yearEnd) {
+    var selectedCrimes = Array.from(document.getElementById("crime-type-dropdown").selectedOptions).map(function(option) {
+        return option.value;
+    });
+
+
+    var filteredData = filterDataByYearRange(originalData, yearStart, yearEnd);
+    filteredData = filterDataByCrimeType(filteredData, selectedCrimes);
+
+    console.log(filteredData.length);
+
+    let crimePercentagesByWard = calculateCrimePercentagesByWard(filteredData);
+    crimeDataGlobal = filteredData;
+    updateMap(crimePercentagesByWard);
+    updateBarChart(Array.from(selectedWards));
+    updateLocationDescriptionChart(Array.from(selectedWards));
+    updateArrestChart(Array.from(selectedWards));
+    updateDescriptionChart(Array.from(selectedWards));
+};
+
+function calculateCrimePercentagesByWard(filteredData) {
+    let countsByWard = {}; 
+    filteredData.forEach(function(d) {
+        if (d.Ward !== "") {
+            if (countsByWard[d.Ward]) {
+                countsByWard[d.Ward] += 1;
+            } else {
+                countsByWard[d.Ward] = 1;
+            }
+        };
+    });
+
+    let totalCrimes = filteredData.length; 
+    let crimePercentagesByWard = {};
+    for (let ward in countsByWard) {
+        crimePercentagesByWard[ward] = countsByWard[ward] / totalCrimes * 100;
+    };
+
+    return crimePercentagesByWard;
+};
+
+function getAldermanInfo(wardNumber) {
+    return d3.csv("/Ward_Offices.csv").then(function(wardData) {
+        var aldermanInfo = wardData.find(function(d) {
+            return String(d.WARD) === wardNumber;
+        });
+    
+        return aldermanInfo;
+    });
+};
+
+function updateWardStyles() {
+    svg.selectAll(".ward")
+        .style("stroke", function(d) {
+            return selectedWards.has(String(d.properties.ward)) ? "red" : "#000";
+        })
+        .style("stroke-width", function(d) {
+            return selectedWards.has(String(d.properties.ward)) ? 2.5 : 1;
+        });
+}; 
+
+d3.csv("/Chicago_Crimes_2012_to_2016.csv").then(function(crimeData) {
+    let countsByWard = {};
+    let totalCrimes = 0;
+    originalData = crimeData.slice(); 
+    crimeDataGlobal = crimeData;
+    crimeData.forEach(function(d) {
+        if (d.Ward !== "") {
+            if (countsByWard[d.Ward]) {
+                countsByWard[d.Ward] += 1;
+            } else {
+                countsByWard[d.Ward] = 1;
+            }
+            totalCrimes += 1;
+        }; 
+    });
+
+    let crimeTypes = new Set(crimeData.map(function(d) { return d["Primary Type"]; }));
+    crimeTypes.add("All");
+    updateDropdown(Array.from(crimeTypes));
+    // console.log(countsByWard);
+    // console.log(totalCrimes);
+
+    let crimePercentagesByWard = {}; 
+    for (let ward in countsByWard) {
+        crimePercentagesByWard[ward] = countsByWard[ward] / totalCrimes * 100;
+    };
+
+    // console.log("crimePercentagesByWard", crimePercentagesByWard);
+    colorScale.domain([0, d3.max(Object.values(crimePercentagesByWard))]);
+
+    d3.json('/ChicagoWards.geojson').then(function(geojsonData) {
+        geojsonDataGlobal = geojsonData;
+        geojsonData.features.forEach(function(d) {
+            let ward = d.properties.ward;
+            d.properties.crimePercentage = crimePercentagesByWard[ward];
+        });
+
+        var b = path.bounds(geojsonData),
+            s = .95 / Math.max((b[1][0] - b[0][0]) / width, (b[1][1] - b[0][1]) / height),
+            t = [(width - s * (b[1][0] + b[0][0])) / 2, (height - s * (b[1][1] + b[0][1])) / 2];
+        projection.scale(s).translate(t);
+        svg.selectAll(".ward")
+        .data(geojsonData.features)
+        .enter().append("path")
+        .attr("class", "ward")
+        .attr("d", path)
+        .style("fill", function(d) {
+            return colorScale(d.properties.crimePercentage || 0);
+        })
+        .style("stroke", "#000")
+        .style("stroke-width", 1)
+        .on("mouseover", mouseOver)
+        .on("mouseleave", mouseLeave)
+        .on("click", function(event, d) {
+            var wardNumber = String(d.properties.ward);
+            if (selectedWards.has(wardNumber)) {
+                selectedWards.delete(wardNumber);
+                d3.select(this).style("stroke", "#000").style("stroke-width", 1);  
+            } else {
+                selectedWards.add(wardNumber); 
+                d3.select(this).style("stroke", "red").style("stroke-width", 2.5); 
+            };
+
+            let selectWardsArray = Array.from(selectedWards);
+            updateBarChart(selectWardsArray);
+            updateLocationDescriptionChart(selectWardsArray);
+            updateArrestChart(selectWardsArray);
+            updateDescriptionChart(selectWardsArray);
+    });
+
+    updateWardStyles(); 
+
+        
+    var legend = svg.append("g")
+        .attr("id", "legend");
+
+    var legendWidth = 300,
+    legendHeight = 20;
+
+    var legendX = 20;
+    var legendY = height - 40;
+
+    var defs = svg.append("defs");
+    var linearGradient = defs.append("linearGradient")
+        .attr("id", "linear-gradient");
+
+    linearGradient.append("stop")
+        .attr("offset", "0%")
+        .attr("stop-color", colorScale(0));
+
+    linearGradient.append("stop")
+        .attr("offset", "100%")
+        .attr("stop-color", colorScale(100));
+
+    legend.append("rect")
+        .attr("x", legendX)
+        .attr("y", legendY)
+        .attr("width", legendWidth)
+        .attr("height", legendHeight)
+        .style("fill", "url(#linear-gradient)");
+
+    var legendScale = d3.scaleLinear()
+        .domain([0, 6])
+        .range([0, legendWidth]);
+    
+    var legendAxis = d3.axisBottom(legendScale)
+        .ticks(6)
+        .tickFormat(d => d + '%');
+
+    legend.append("g")
+        .attr("class", "legend-axis")
+        .attr("transform", "translate(" + legendX + "," + (legendY + legendHeight) + ")")
+        .call(legendAxis);
+    });
+});
+
+function updateBarChart(selectedWardsArray) {
+
+    if (selectedWardsArray.length === 0) {
+        d3.select("#barChart").html("");
+        return;
+    }
+
+    d3.select("#barChart").html("");
+    let barChartTooltip = d3.select("#barChartTooltip");
+
+    let crimeCountsByWard = {};
+    let cumulativeCrimeCounts = {};
+
+    selectedWardsArray.forEach(ward => {
+        let wardData = crimeDataGlobal.filter(d => String(d.Ward) === ward);
+        let crimeCounts = {};
+        wardData.forEach(d => {
+            crimeCounts[d["Primary Type"]] = (crimeCounts[d["Primary Type"]] || 0) + 1;
+        });
+        crimeCountsByWard[ward] = crimeCounts;
+    });
+    
+    let margin = { top: 60, right: 50, bottom: 225, left: 80 },
+        barWidth = 960 - margin.left - margin.right,
+        barHeight = 500 - margin.top - margin.bottom;
+
+    let svg = d3.select("#barChart").append("svg")
+        .attr("width", barWidth + 500)
+        .attr("height", barHeight + margin.top + margin.bottom)
+        .append("g")
+        .attr("transform","translate(" + margin.left + "," + margin.top + ")");;
+
+    svg.append("text")
+        .attr("x", (barWidth / 2))             
+        .attr("y", 0 - (margin.top / 2))
+        .attr("text-anchor", "middle")  
+        .style("font-size", "16px") 
+        .style("text-decoration", "underline")  
+        .text("Crime Counts by Crime Type");
+
+    selectedWardsArray.forEach(ward => {
+        Object.keys(crimeCountsByWard[ward]).forEach(crimeType => {
+            cumulativeCrimeCounts[crimeType] = (cumulativeCrimeCounts[crimeType] || 0) + crimeCountsByWard[ward][crimeType];
+        });
+    });
+
+    let filteredCrimeTypes = Object.keys(cumulativeCrimeCounts).filter(crimeType => cumulativeCrimeCounts[crimeType] > 0);
+
+    let sortedCrimeTypes = filteredCrimeTypes.sort(function(a, b) {
+        return cumulativeCrimeCounts[b] - cumulativeCrimeCounts[a];
+    });
+
+    let x0 = d3.scaleBand()
+        .rangeRound([0, barWidth])
+        .padding(0.1)
+        .domain(sortedCrimeTypes);
+    
+    let x1 = d3.scaleBand()
+        .padding(0.1)
+        .domain(selectedWardsArray)
+        .rangeRound([0, x0.bandwidth()]);
+
+    let y = d3.scaleLinear()
+        .rangeRound([barHeight, 0])
+        .domain([0, d3.max(Object.values(crimeCountsByWard), crimes => d3.max(Object.values(crimes)))]);
+    
+    let legendWidth = 200;
+    let svgWidth = barWidth + margin.left + margin.right + legendWidth;
+    let svgHeight = barHeight + margin.top + margin.bottom;
+
+    let legendX = barWidth + margin.right / 2; 
+    let legendY = margin.top; 
+
+    let legend = svg.append("g")
+        .attr("class", "legend")
+        .attr("transform", `translate(${legendX}, ${legendY})`);
+
+    selectedWardsArray.forEach((ward, index) => {
+        let legendItem = legend.append("g")
+            .attr("transform", `translate(0,${index * 20})`);
+
+        legendItem.append("rect")
+            .attr("width", 18)
+            .attr("height", 18)
+            .attr("fill", wardColorScale(ward));
+
+        legendItem.append("text")
+            .attr("x", 24)
+            .attr("y", 9)
+            .attr("dy", "0.35em")
+            .text("Ward " + ward);
+    });
+
+    x0.domain().forEach(crimeType => {
+        let crimeTypeGroup = svg.append("g").attr("transform", `translate(${x0(crimeType)},0)`);
+
+        selectedWardsArray.forEach(ward => {
+            crimeTypeGroup.append("rect")
+                .attr("x", x1(ward))
+                .attr("y", y(crimeCountsByWard[ward][crimeType] || 0))
+                .attr("width", x1.bandwidth())
+                .attr("height", barHeight - y(crimeCountsByWard[ward][crimeType] || 0))
+                .attr("fill", wardColorScale(ward))
+                .on("mouseover", function(event, d) {
+                    barChartTooltip.style("opacity", 0.9)
+                        .html(`
+                            <div style="font-size: 14px; margin-bottom: 10px;">
+                                <strong>Ward:</strong> ${ward}<br/>
+                                <strong>Crime Type:</strong> ${crimeType}<br/>
+                                <strong>Crime Count:</strong> ${crimeCountsByWard[ward][crimeType] || 0}
+                            </div>
+                        `)
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseleave", function(event, d) {
+                    barChartTooltip.style("opacity", 0);
+                });
+        });
+    });
+
+    // Add axes
+    svg.append("g")
+        .call(d3.axisLeft(y));
+
+    svg.append("g")
+        .attr("transform", `translate(0,${barHeight})`)
+        .call(d3.axisBottom(x0))
+        .selectAll("text")
+        .style("text-anchor", "end")
+        .attr("dx", "-.8em")
+        .attr("dy", ".15em")
+        .attr("transform", "rotate(-65)");
+}; 
+
+function updateLocationDescriptionChart(selectedWardsArray) {
+
+    if (selectedWardsArray.length === 0) {
+        d3.select("#locationDescriptionChart").html("");
+        return;
+    }
+
+    d3.select("#locationDescriptionChart").html("");
+    let locationDescriptionChartTooltip = d3.select("#locationDescriptionChartTooltip");
+
+    let locationDescriptionsByWard = {};
+    selectedWardsArray.forEach(ward => {
+        let wardData = crimeDataGlobal.filter(d => String(d.Ward) === ward);
+        let locationDescriptions = {};
+        wardData.forEach(d => {
+            locationDescriptions[d["Location Description"]] = (locationDescriptions[d["Location Description"]] || 0) + 1;
+        });
+        locationDescriptionsByWard[ward] = locationDescriptions;
+    });
+
+    let margin = { top: 45, right: 50, bottom: 225, left: 80 },
+        barWidth = 960 - margin.left - margin.right,
+        barHeight = 500 - margin.top - margin.bottom;
+
+    let svg = d3.select("#locationDescriptionChart").append("svg")
+        .attr("width", barWidth + 500)
+        .attr("height", barHeight + margin.top + margin.bottom)
+        .append("g")
+        .attr("transform","translate(" + margin.left + "," + margin.top + ")");;
+        
+    svg.append("text")
+        .attr("x", (barWidth / 2))             
+        .attr("y", 0 - (margin.top / 2))
+        .attr("text-anchor", "middle")  
+        .style("font-size", "16px") 
+        .style("text-decoration", "underline")  
+        .text("Crime Counts by Location Description"); 
+
+    let cumulativeLocationDescriptions = {};
+    selectedWardsArray.forEach(ward => {
+        Object.keys(locationDescriptionsByWard[ward]).forEach(locationDescription => {
+            cumulativeLocationDescriptions[locationDescription] = (cumulativeLocationDescriptions[locationDescription] || 0) + locationDescriptionsByWard[ward][locationDescription];
+        });
+    });
+
+    let filteredLocationDescriptions = Object.keys(cumulativeLocationDescriptions).filter(locationDescription => cumulativeLocationDescriptions[locationDescription] > 0);
+
+    let sortedLocationDescriptions = filteredLocationDescriptions.sort(function(a, b) {
+        return cumulativeLocationDescriptions[b] - cumulativeLocationDescriptions[a];
+    });
+
+    let x0 = d3.scaleBand()
+        .rangeRound([0, barWidth])
+        .padding(0.1)
+        .domain(sortedLocationDescriptions);
+
+    let x1 = d3.scaleBand()
+        .padding(0.1)
+        .domain(selectedWardsArray)
+        .rangeRound([0, x0.bandwidth()]);
+
+    let y = d3.scaleLinear()
+        .rangeRound([barHeight, 0])
+        .domain([0, d3.max(Object.values(locationDescriptionsByWard), locationDescriptions => d3.max(Object.values(locationDescriptions)))]);
+
+    let legendWidth = 200;
+    let svgWidth = barWidth + margin.left + margin.right + legendWidth;
+    let svgHeight = barHeight + margin.top + margin.bottom;
+
+    let legendX = barWidth + margin.right / 2; 
+    let legendY = margin.top;
+
+    let legend = svg.append("g")
+        .attr("class", "legend")
+        .attr("transform", `translate(${legendX}, ${legendY})`);
+
+    selectedWardsArray.forEach((ward, index) => {
+        let legendItem = legend.append("g")
+            .attr("transform", `translate(0,${index * 20})`);
+
+        legendItem.append("rect")
+            .attr("width", 18)
+            .attr("height", 18)
+            .attr("fill", wardColorScale(ward));
+
+        legendItem.append("text")
+            .attr("x", 24)
+            .attr("y", 9)
+            .attr("dy", "0.35em")
+            .text("Ward " + ward);
+    });
+
+    x0.domain().forEach(locationDesc => {
+        let locationDescGroup = svg.append("g").attr("transform", `translate(${x0(locationDesc)},0)`);
+
+        selectedWardsArray.forEach(ward => {
+            locationDescGroup.append("rect")
+                .attr("x", x1(ward))
+                .attr("y", y(locationDescriptionsByWard[ward][locationDesc] || 0))
+                .attr("width", x1.bandwidth())
+                .attr("height", barHeight - y(locationDescriptionsByWard[ward][locationDesc] || 0))
+                .attr("fill", wardColorScale(ward))
+                .on("mouseover", function(event, d) {
+                    locationDescriptionChartTooltip.style("opacity", 0.9)
+                        .html(`
+                            <div style="font-size: 14px; margin-bottom: 10px;">
+                                <strong>Ward:</strong> ${ward}<br/>
+                                <strong>Location Description:</strong> ${locationDesc}<br/>
+                                <strong>Crime Count:</strong> ${locationDescriptionsByWard[ward][locationDesc] || 0}
+                            </div>
+                        `)
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseleave", function(event, d) {
+                    locationDescriptionChartTooltip.style("opacity", 0);
+                });
+        });
+    });
+
+    svg.append("g")
+        .call(d3.axisLeft(y));
+
+    svg.append("g")
+        .attr("transform", `translate(0,${barHeight})`)
+        .call(d3.axisBottom(x0))
+        .selectAll("text")
+        .style("text-anchor", "end")
+        .attr("dx", "-.8em")
+        .attr("dy", ".15em")
+        .attr("transform", "rotate(-65)");
+};
+
+function updateArrestChart(selectedWardsArray) {
+
+    if (selectedWardsArray.length === 0) {
+        d3.select("#arrestChart").html("");
+        return;
+    }
+
+    d3.select("#arrestChart").html("");
+    let arrestChartTooltip = d3.select("#arrestChartTooltip");
+
+    let arrestCountsByWard = {};
+    let cumulativeArrestCounts = {};
+
+    selectedWardsArray.forEach(ward => {
+        let wardData = crimeDataGlobal.filter(d => String(d.Ward) === ward);
+        let arrestCounts = {};
+        wardData.forEach(d => {
+            arrestCounts[d["Arrest"]] = (arrestCounts[d["Arrest"]] || 0) + 1;
+        });
+        arrestCountsByWard[ward] = arrestCounts;
+    });
+
+    let margin = { top: 45, right: 50, bottom: 225, left: 80 },
+        barWidth = 960 - margin.left - margin.right,
+        barHeight = 500 - margin.top - margin.bottom;
+
+    let svg = d3.select("#arrestChart").append("svg")
+        .attr("width", barWidth + 500)
+        .attr("height", barHeight + margin.top + margin.bottom)
+        .append("g")
+        .attr("transform","translate(" + margin.left + "," + margin.top + ")");
+
+    svg.append("text")
+        .attr("x", (barWidth / 2))             
+        .attr("y", 0 - (margin.top / 2))
+        .attr("text-anchor", "middle")  
+        .style("font-size", "16px") 
+        .style("text-decoration", "underline")  
+        .text("Arrest Counts by Arrest Status");
+
+    selectedWardsArray.forEach(ward => {
+        Object.keys(arrestCountsByWard[ward]).forEach(arrest => {
+            cumulativeArrestCounts[arrest] = (cumulativeArrestCounts[arrest] || 0) + arrestCountsByWard[ward][arrest];
+        });
+    });
+
+    let filteredArrests = Object.keys(cumulativeArrestCounts).filter(arrest => cumulativeArrestCounts[arrest] > 0);
+
+    let sortedArrests = filteredArrests.sort(function(a, b) {
+        return cumulativeArrestCounts[b] - cumulativeArrestCounts[a];
+    });
+
+    let x0 = d3.scaleBand()
+        .rangeRound([0, barWidth])
+        .padding(0.1)
+        .domain(sortedArrests);
+
+    let x1 = d3.scaleBand()
+        .padding(0.1)
+        .domain(selectedWardsArray)
+        .rangeRound([0, x0.bandwidth()]);
+
+    let y = d3.scaleLinear()
+        .rangeRound([barHeight, 0])
+        .domain([0, d3.max(Object.values(arrestCountsByWard), arrests => d3.max(Object.values(arrests)))]);
+
+    let legendWidth = 200;
+    let svgWidth = barWidth + margin.left + margin.right + legendWidth;
+    let svgHeight = barHeight + margin.top + margin.bottom;
+
+    let legendX = barWidth + margin.right / 2; 
+    let legendY = margin.top;
+
+    let legend = svg.append("g")
+        .attr("class", "legend")
+        .attr("transform", `translate(${legendX}, ${legendY})`);
+
+    selectedWardsArray.forEach((ward, index) => {
+        let legendItem = legend.append("g")
+            .attr("transform", `translate(0,${index * 20})`);
+
+        legendItem.append("rect")
+            .attr("width", 18)
+            .attr("height", 18)
+            .attr("fill", wardColorScale(ward));
+
+        legendItem.append("text")
+            .attr("x", 24)
+            .attr("y", 9)
+            .attr("dy", "0.35em")
+            .text("Ward " + ward);
+    });
+
+    x0.domain().forEach(arrest => {
+        let arrestGroup = svg.append("g").attr("transform", `translate(${x0(arrest)},0)`);
+
+        selectedWardsArray.forEach(ward => {
+            arrestGroup.append("rect")
+                .attr("x", x1(ward))
+                .attr("y", y(arrestCountsByWard[ward][arrest] || 0))
+                .attr("width", x1.bandwidth())
+                .attr("height", barHeight - y(arrestCountsByWard[ward][arrest] || 0))
+                .attr("fill", wardColorScale(ward))
+                .on("mouseover", function(event, d) {
+                    arrestChartTooltip.style("opacity", 0.9)
+                        .html(`
+                            <div style="font-size: 14px; margin-bottom: 10px;">
+                                <strong>Ward:</strong> ${ward}<br/>
+                                <strong>Arrest:</strong> ${arrest}<br/>
+                                <strong>Crime Count:</strong> ${arrestCountsByWard[ward][arrest] || 0}
+                            </div>
+                        `)
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseleave", function(event, d) {
+                    arrestChartTooltip.style("opacity", 0);
+                });
+        });
+    });
+
+    svg.append("g")
+        .call(d3.axisLeft(y));
+
+    svg.append("g")
+        .attr("transform", `translate(0,${barHeight})`)
+        .call(d3.axisBottom(x0))
+        .selectAll("text")
+        .style("text-anchor", "end")
+        .attr("dx", "-.8em")
+        .attr("dy", ".15em")
+        .attr("transform", "rotate(-65)");
+};
+
+function updateDescriptionChart(selectedWardsArray) {
+
+    if (selectedWardsArray.length === 0) {
+        d3.select("#descriptionChart").html("");
+        return;
+    };
+
+    d3.select("#descriptionChart").html("");
+    let descriptionChartTooltip = d3.select("#descriptionChartTooltip");
+
+    let descriptionsByWard = {};
+    let culmulativeDescriptions = {};
+
+    selectedWardsArray.forEach(ward => {
+        let wardData = crimeDataGlobal.filter(d => String(d.Ward) === ward);
+        let descriptions = {};
+        wardData.forEach(d => {
+            descriptions[d["Description"]] = (descriptions[d["Description"]] || 0) + 1;
+        });
+        descriptionsByWard[ward] = descriptions;
+    });
+
+    let margin = { top: 45, right: 50, bottom: 225, left: 80 },
+        barWidth = 960 - margin.left - margin.right,
+        barHeight = 500 - margin.top - margin.bottom;
+
+    let svg = d3.select("#descriptionChart").append("svg")
+        .attr("width", barWidth + 500)
+        .attr("height", barHeight + margin.top + margin.bottom)
+        .append("g")
+        .attr("transform","translate(" + margin.left + "," + margin.top + ")");
+
+    svg.append("text")
+        .attr("x", (barWidth / 2))             
+        .attr("y", 0 - (margin.top / 2))
+        .attr("text-anchor", "middle")  
+        .style("font-size", "16px") 
+        .style("text-decoration", "underline")  
+        .text("Crime Counts by Description");
+
+    selectedWardsArray.forEach(ward => {
+        Object.keys(descriptionsByWard[ward]).forEach(description => {
+            culmulativeDescriptions[description] = (culmulativeDescriptions[description] || 0) + descriptionsByWard[ward][description];
+        });
+    });
+
+    // let filteredDescriptions = Object.keys(culmulativeDescriptions).filter(description => culmulativeDescriptions[description] > 50);
+
+    let sortedDescriptions = Object.keys(culmulativeDescriptions)
+        .sort((a,b) => culmulativeDescriptions[b] - culmulativeDescriptions[a])
+        .slice(0, 30); 
+
+    let x0 = d3.scaleBand()
+        .rangeRound([0, barWidth])
+        .padding(0.1)
+        .domain(sortedDescriptions);
+
+    let x1 = d3.scaleBand()
+        .padding(0.1)
+        .domain(selectedWardsArray)
+        .rangeRound([0, x0.bandwidth()]);
+
+    let y = d3.scaleLinear()
+        .rangeRound([barHeight, 0])
+        .domain([0, d3.max(Object.values(descriptionsByWard), descriptions => d3.max(Object.values(descriptions)))]);
+    
+    let legendWidth = 200;
+    let svgWidth = barWidth + margin.left + margin.right + legendWidth;
+    let svgHeight = barHeight + margin.top + margin.bottom;
+
+    let legendX = barWidth + margin.right / 2; 
+    let legendY = margin.top; 
+
+    let legend = svg.append("g")
+        .attr("class", "legend")
+        .attr("transform", `translate(${legendX}, ${legendY})`);
+
+    selectedWardsArray.forEach((ward, index) => {
+        let legendItem = legend.append("g")
+            .attr("transform", `translate(0,${index * 20})`);
+
+        legendItem.append("rect")
+            .attr("width", 18)
+            .attr("height", 18)
+            .attr("fill", wardColorScale(ward));
+
+        legendItem.append("text")
+            .attr("x", 24)
+            .attr("y", 9)
+            .attr("dy", "0.35em")
+            .text("Ward " + ward);
+    });
+
+    x0.domain().forEach(description => {
+        let descriptionGroup = svg.append("g").attr("transform", `translate(${x0(description)},0)`);
+
+        selectedWardsArray.forEach(ward => {
+            descriptionGroup.append("rect")
+                .attr("x", x1(ward))
+                .attr("y", y(descriptionsByWard[ward][description] || 0))
+                .attr("width", x1.bandwidth())
+                .attr("height", barHeight - y(descriptionsByWard[ward][description] || 0))
+                .attr("fill", wardColorScale(ward))
+                .on("mouseover", function(event, d) {
+                    descriptionChartTooltip.style("opacity", 0.9)
+                        .html(`
+                            <div style="font-size: 14px; margin-bottom: 10px;">
+                                <strong>Ward:</strong> ${ward}<br/>
+                                <strong>Description:</strong> ${description}<br/>
+                                <strong>Crime Count:</strong> ${descriptionsByWard[ward][description] || 0}
+                            </div>
+                        `)
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseleave", function(event, d) {
+                    descriptionChartTooltip.style("opacity", 0);
+                });
+        });
+    });
+
+    svg.append("g")
+        .call(d3.axisLeft(y));
+
+    svg.append("g")
+        .attr("transform", `translate(0,${barHeight})`)
+        .call(d3.axisBottom(x0))
+        .selectAll("text")
+        .style("text-anchor", "end")
+        .attr("dx", "-.8em")
+        .attr("dy", ".15em")
+        .attr("transform", "rotate(-65)");
+
+};
+    </script>
+</body> 
+</html>
